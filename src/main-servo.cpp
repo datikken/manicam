@@ -26,17 +26,21 @@ constexpr uint8_t  kPinServoX = 9;
 constexpr uint8_t  kPinServoY = 10;
 constexpr uint8_t  kPinLed    = 4;
 
-// Travel limits per axis. Tighten these once the rig's real end stops are
-// known; the neutral pose is in the middle of each range.
-constexpr int kAxisXMin = 0;
-constexpr int kAxisXMax = 180;
-constexpr int kAxisYMin = 0;
-constexpr int kAxisYMax = 180;
+// Travel limits per axis, kept INSIDE the SG90's mechanical end stops.
+//
+// An SG90 can be driven to 0 and 180 electrically, but its plastic gears and
+// internal stop cannot take being parked there under power: it buzzes, draws
+// stall current and overheats. Leaving a few degrees of margin is what keeps a
+// micro servo alive. Tighten further if the mechanism has its own hard stops.
+constexpr int kAxisXMin = 10;
+constexpr int kAxisXMax = 170;
+constexpr int kAxisYMin = 10;
+constexpr int kAxisYMax = 170;
 
-// The rig is an endless pan/tilt head: it keeps turning for as long as the
-// stick is held. With real end stops set this to false so the axis parks on
-// the stop instead of wrapping to the other side.
-constexpr bool kAxisIsContinuous = true;
+// The rig is driven by standard positional SG90 servos: about 180 degrees of
+// travel each, no continuous rotation. The axis therefore stops at its limits
+// instead of wrapping - see Axis.h for the full reasoning.
+constexpr bool kAxisIsContinuous = false;
 
 Axis        axisX(kAxisXMin, kAxisXMax);
 Axis        axisY(kAxisYMin, kAxisYMax);
@@ -47,11 +51,6 @@ LinkSlave   link(kOwnAddr);
 }  // namespace
 
 void setup() {
-    // Wrap-around must be configured BEFORE the stored pose is restored, so a
-    // saved 180 does not become a hard end stop on a continuous axis.
-    axisX.setWrap(kAxisIsContinuous);
-    axisY.setWrap(kAxisIsContinuous);
-
     axisX.begin(kPinServoX);
     axisY.begin(kPinServoY);
 
@@ -87,4 +86,5 @@ void loop() {
 
   positions.update();      // persists the pose once the axes settle
 }
+
 

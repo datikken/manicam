@@ -33,7 +33,8 @@ void Axis::begin(uint8_t pin, int startAngle) {
 
 void Axis::writePos(int angle) {
     // Single funnel for every servo write: limits and bookkeeping stay in sync
-    // no matter which public method asked for the move.
+    // no matter which public method asked for the move. The clamp is what stops
+    // the servo being driven past its mechanical travel.
     pos_ = constrain(angle, min_, max_);
     if (attached_) {
         servo_.write(pos_);
@@ -57,37 +58,25 @@ void Axis::moveTo(int angle, uint16_t stepDelayMs) {
     }
 }
 
-bool Axis::stepBy(int delta, uint16_t stepDelayMs) {
-    int next = pos_ + delta;
-
-    if (wrap_) {
-        // Continuous axis: wrap around the full swing instead of latching at
-        // an end stop. This is what keeps the stick responsive after any
-        // number of full turns.
-        const int span = max_ - min_ + 1;
-        if (span > 0) {
-            next = min_ + (((next - min_) % span) + span) % span;
-        }
-    } else {
-        // Limited axis: stop dead on the end stop.
-        next = constrain(next, min_, max_);
-    }
+bool Axis::stepBy(int delta) {
+    // Limited axis: walk toward the limit and stop dead on it. No wrap-around -
+    // see the header for why an SG90 must never be told to jump across its arc.
+    const int next = constrain(pos_ + delta, min_, max_);
 
     if (next == pos_) {
-        return false;                 // at the end stop: nothing to do
+        return false;                 // on the end stop: nothing to do
     }
 
     writePos(next);
-    delay(stepDelayMs);               // let the servo physically reach this step
-    return true;
+    return true;                      // never sleeps: the caller paces us
 }
 
-bool Axis::rotateClockwise(uint16_t stepDelayMs) {
-    return stepBy(kStep, stepDelayMs);
+bool Axis::rotateClockwise() {
+    return stepBy(kStep);
 }
 
-bool Axis::rotateCounterClockwise(uint16_t stepDelayMs) {
-    return stepBy(-kStep, stepDelayMs);
+bool Axis::rotateCounterClockwise() {
+    return stepBy(-kStep);
 }
 
 void Axis::sweepToMax() {

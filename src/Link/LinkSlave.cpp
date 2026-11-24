@@ -23,6 +23,7 @@ void LinkSlave::onReceiveTrampoline(int count) {
 
 void LinkSlave::handleReceive(int count) {
     JoystickFrame frame;
+    lastCount_ = count;
     bool ok = (count == (int)JoystickFrame::kSize);
 
     if (ok) {
@@ -39,7 +40,10 @@ void LinkSlave::handleReceive(int count) {
     }
 
     if (ok) {
+        ++accepted_;
         publish(frame);
+    } else {
+        ++rejected_;
     }
 }
 
@@ -69,3 +73,4 @@ bool LinkSlave::take(JoystickFrame& out) {
     out.btn = btn;
     return fresh && hasData_;
 }
+

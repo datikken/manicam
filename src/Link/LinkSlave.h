@@ -37,6 +37,16 @@ public:
 
     uint8_t ownAddress() const { return ownAddr_; }
 
+    // Diagnostic counters - used by a self-test build to answer "are frames
+    // arriving at all, and are they being rejected?" without a logic analyser.
+    //   accepted  - frames that passed size + range checks
+    //   rejected  - frames that arrived but failed a check
+    //   lastCount - byte count reported by the ISR for the latest frame
+    uint16_t acceptedCount() const { return accepted_; }
+    uint16_t rejectedCount() const { return rejected_; }
+    int      lastByteCount() const { return lastCount_; }
+    void     resetStats() { accepted_ = 0; rejected_ = 0; lastCount_ = -1; }
+
 private:
     static void onReceiveTrampoline(int count);
 
@@ -53,4 +63,10 @@ private:
     volatile bool pendingBtn_ = false;
     volatile bool pendingNew_ = false;   // a fresh frame is waiting
     volatile bool hasData_    = false;   // a frame has ever been received
+
+    volatile uint16_t accepted_ = 0;
+    volatile uint16_t rejected_ = 0;
+    volatile int      lastCount_ = -1;
 };
+
+

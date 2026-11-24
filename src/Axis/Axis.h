@@ -4,22 +4,31 @@
 #include <Servo.h>
 
 // One servo-driven axis of the camera rig.
+//
+// The servo is a Tower Pro SG90: a STANDARD POSITIONAL micro servo. It has
+// about 180 degrees of mechanical travel and no feedback, so:
+//
+//   * an angle of 0..180 is a POSITION, not a speed;
+//   * it physically CANNOT complete a full rotation;
+//   * asking for a position far across its arc makes it swing there as fast as
+//     it can - it is not a "rotate" command.
+//
+// Therefore the axis is deliberately LIMITED: it clamps to [min_, max_] and
+// stops there. There is no wrap-around. Wrapping the angle 180 -> 0 would tell
+// the servo to slam its arm backwards across the whole arc, which stalls the
+// motor, overheats the SG90's tiny driver and makes it stop responding - the
+// "works for a few turns, then dies" failure.
+//
+// An SG90 is also a light-duty part: parking it against a mechanical end stop
+// under power makes it buzz and heat up. main-servo.cpp therefore sets limits
+// slightly inside the mechanical extremes.
 class Axis {
 public:
     static constexpr int kMinAngleValue = 0;      // full-swing lower bound
     static constexpr int kMaxAngleValue = 180;    // full-swing upper bound
     static constexpr int kCenterAngle   = 90;     // neutral / power-on pose
     static constexpr int kStep          = 1;      // degrees per rotate step
-    static constexpr uint16_t kDefaultStepDelayMs = 15;  // fallback settle time
-
-    // The servo only understands 0..180. A rig that keeps being driven in one
-    // direction must therefore *wrap around* instead of latching at an end
-    // stop: going past 180 returns to 0 and vice versa. That keeps the stick
-    // responsive no matter how many full turns the operator has made.
-    //
-    // Wrapping is a property of a continuous (endless) axis. A mechanism with
-    // real end stops must turn it off with setWrap(false) - see main-servo.cpp.
-    static constexpr bool kDefaultWrap = true;
+    static constexpr uint16_t kDefaultStepDelayMs = 20;  // settle time, SG90
 
     // Build the axis and configure its travel limits. The servo is attached
     // later by begin(): limits are a property of the mechanism, the pin is a
@@ -31,11 +40,6 @@ public:
     // Configure the limits in place (keeps the current position, re-clamped).
     void setRange(int minAngle, int maxAngle);
 
-    // Enable/disable wrap-around at the limits. When disabled the axis is a
-    // limited axis: it stops at min_/max_ (mechanisms with end stops).
-    void setWrap(bool wrap) { wrap_ = wrap; }
-    bool wraps() const { return wrap_; }
-
     // Attach the servo to `pin` and drive it to the given pose. Must be called
     // before any other motion method.
     void begin(uint8_t pin, int startAngle = kCenterAngle);
@@ -44,10 +48,11 @@ public:
     int  getPos() const { return pos_; }
     bool isMoving() const { return pos_ != target_; }
 
-    // True when the axis can no longer move in the given direction: a limited
-    // axis sitting on an end stop. Wrapping axes never report "stuck".
-    bool blockedClockwise() const { return !wrap_ && pos_ >= max_; }
-    bool blockedCounterClockwise() const { return !wrap_ && pos_ <= min_; }
+    // True when the axis sits on a travel limit and cannot move further in that
+    // direction. Lets the caller tell "at the end" from "still moving".
+    bool blockedClockwise() const { return pos_ >= max_; }
+    bool blockedCounterClockwise() const { return pos_ <= min_; }
+    bool atEnd() const { return blockedClockwise() || blockedCounterClockwise(); }
 
     // Jump to an absolute angle (clamped to the configured limits).
     void setPos(int angle);
@@ -57,14 +62,18 @@ public:
     // Blocking - use rotate*() from a non-blocking loop() instead.
     void moveTo(int angle, uint16_t stepDelayMs = kDefaultStepDelayMs);
 
-    // Advance exactly ONE step toward the upper/lower limit and wait
-    // stepDelayMs. Used to drive the axis from a joystick: the caller decides
-    // *whether* to step, the axis only knows *how*.
+    // Advance exactly ONE degree toward the upper/lower limit, stopping at it.
+    // Used to drive the axis from a joystick: the caller decides *whether* to
+    // step, the axis only knows *how*.
     //
-    // Returns true when the axis actually moved. On a limited axis sitting on
-    // its end stop this returns false, which lets the caller detect "stuck".
-    bool rotateClockwise(uint16_t stepDelayMs = kDefaultStepDelayMs);
-    bool rotateCounterClockwise(uint16_t stepDelayMs = kDefaultStepDelayMs);
+    // These do NOT sleep. Rate limiting is the caller's job (see
+    // AxisDriver::update), so the servo board's loop() keeps servicing I2C
+    // while the axis moves.
+    //
+    // Returns true when the axis actually moved; false means it is already on
+    // the end stop.
+    bool rotateClockwise();
+    bool rotateCounterClockwise();
 
     // Sweep the whole travel to calibrate the mechanism. Blocking.
     void sweepToMin();
@@ -82,12 +91,10 @@ private:
     int  min_    = kMinAngleValue;
     int  max_    = kMaxAngleValue;
     bool attached_ = false;
-    bool wrap_     = kDefaultWrap;
 
-    // Apply one step of `delta` degrees, honouring wrap-around on a wrapping
-    // axis and clamping on a limited one. Returns true when the axis moved.
-    bool stepBy(int delta, uint16_t stepDelayMs);
+    // Move by `delta` degrees, clamped to the limits. Returns true on movement.
+    // Never blocks.
+    bool stepBy(int delta);
 
     void writePos(int angle);
 };
-

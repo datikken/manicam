@@ -12,17 +12,22 @@
 // The stick rests near `center` (512 on a 10-bit ADC). The further it is pushed
 // away from the centre, the faster the axis is asked to move:
 //
-//   |delta| <= deadZone        -> hold still
-//   |delta| <= tier2           -> slow   (kDelaySlow   ms per degree)
-//   |delta| <= tier3           -> medium (kDelayMedium ms per degree)
-//   |delta|  > tier3           -> fast   (kDelayFast   ms per degree)
+//   |delta| <= deadZone  -> hold still
+//   |delta| <= kTierSlow -> slow   (kDelaySlow   ms per degree)
+//   |delta| <= kTierMed  -> medium (kDelayMedium ms per degree)
+//   |delta|  > kTierMed  -> fast   (kDelayFast   ms per degree)
+//
+// The dead zone exists because a real thumbstick never rests at exactly 512 and
+// its reading jitters by a few counts. It must be comfortably larger than that
+// jitter, otherwise the axis would creep (and eventually walk into a limit)
+// while the operator is not touching the stick.
 //
 // update() advances the axis by at most ONE degree per call, so loop() stays
 // responsive and the I2C receive path keeps running while the servo moves.
 class AxisDriver {
 public:
     static constexpr int kDefaultCenter   = 512;   // ADC value at rest
-    static constexpr int kDefaultDeadZone = 30;
+    static constexpr int kDefaultDeadZone = 60;    // ~6% of the throw each way
 
     AxisDriver(Axis& axis,
                int center  = kDefaultCenter,
@@ -38,16 +43,21 @@ public:
     void setDeadZone(int deadZone) { deadZone_ = deadZone; }
     int  getCenter() const { return center_; }
 
+    // Re-learn the resting value: call with the stick untouched at boot.
+    void calibrate(int stickValue) { center_ = stickValue; }
+
 private:
     Axis& axis_;
     int center_;
     int deadZone_;
 
-    static constexpr int kTierSlow   = 200;   // 200..599  -> medium
-    static constexpr int kTierMedium = 600;   // 600..849  -> fast
-    static constexpr int kTierFast   = 850;   // 850+      -> fastest
+    // Distance bands measured from center_. Must be strictly increasing and
+    // above the dead zone for the tiers to be reachable.
+    static constexpr int kTierSlow = 150;   // slowest band
+    static constexpr int kTierMed  = 350;   // medium band
 
     static constexpr uint16_t kDelaySlow   = 8;
     static constexpr uint16_t kDelayMedium = 4;
     static constexpr uint16_t kDelayFast   = 1;
 };
+

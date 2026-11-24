@@ -62,6 +62,16 @@ void PositionStore::writeRecord(int x, int y) {
 }
 
 void PositionStore::restore() {
+    // A continuous axis has no absolute pose: whatever value was stored refers
+    // to a position it has long since wrapped past. Leave it at neutral.
+    if (axisX_.wraps() || axisY_.wraps()) {
+        lastSavedX_ = -1;
+        lastSavedY_ = -1;
+        haveSaved_  = false;
+        dirty_      = false;
+        return;
+    }
+
     int x = 0;
     int y = 0;
 
@@ -85,6 +95,11 @@ void PositionStore::restore() {
 }
 
 void PositionStore::update() {
+    // Nothing to persist for an axis that wraps: the angle repeats every turn.
+    if (axisX_.wraps() || axisY_.wraps()) {
+        return;
+    }
+
     const int x = axisX_.getPos();
     const int y = axisY_.getPos();
 
@@ -115,3 +130,4 @@ void PositionStore::clear() {
     lastSavedY_ = -1;
     dirty_      = false;
 }
+

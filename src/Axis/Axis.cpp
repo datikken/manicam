@@ -57,20 +57,37 @@ void Axis::moveTo(int angle, uint16_t stepDelayMs) {
     }
 }
 
-void Axis::rotateClockwise(uint16_t stepDelayMs) {
-    if (pos_ >= max_) {
-        return;                       // already at the upper limit
+bool Axis::stepBy(int delta, uint16_t stepDelayMs) {
+    int next = pos_ + delta;
+
+    if (wrap_) {
+        // Continuous axis: wrap around the full swing instead of latching at
+        // an end stop. This is what keeps the stick responsive after any
+        // number of full turns.
+        const int span = max_ - min_ + 1;
+        if (span > 0) {
+            next = min_ + (((next - min_) % span) + span) % span;
+        }
+    } else {
+        // Limited axis: stop dead on the end stop.
+        next = constrain(next, min_, max_);
     }
-    writePos(pos_ + kStep);
+
+    if (next == pos_) {
+        return false;                 // at the end stop: nothing to do
+    }
+
+    writePos(next);
     delay(stepDelayMs);               // let the servo physically reach this step
+    return true;
 }
 
-void Axis::rotateCounterClockwise(uint16_t stepDelayMs) {
-    if (pos_ <= min_) {
-        return;                       // already at the lower limit
-    }
-    writePos(pos_ - kStep);
-    delay(stepDelayMs);
+bool Axis::rotateClockwise(uint16_t stepDelayMs) {
+    return stepBy(kStep, stepDelayMs);
+}
+
+bool Axis::rotateCounterClockwise(uint16_t stepDelayMs) {
+    return stepBy(-kStep, stepDelayMs);
 }
 
 void Axis::sweepToMax() {

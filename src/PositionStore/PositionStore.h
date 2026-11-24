@@ -28,10 +28,19 @@ public:
     // Read the saved pose and move the axes to it. Call once from setup(),
     // after the axes are attached. When the EEPROM is empty or the record is
     // invalid the axes are left where they are (the neutral pose).
+    //
+    // On a continuous (wrapping) axis there is no meaningful absolute pose to
+    // return to, so restore() is a no-op there and the axis simply boots at
+    // neutral. This also guarantees a saved 180 can never park a wrapping axis
+    // on an end stop.
     void restore();
 
     // Call every loop() pass. Tracks movement and saves the pose to EEPROM once
     // the axes have stopped for the debounce interval.
+    //
+    // Saving is skipped while either axis wraps, for the same reason: every full
+    // turn revisits the same 0..180 values, so writing them would be pointless
+    // and would only wear out the EEPROM cells.
     void update();
 
     // Force an immediate save of the current pose.
@@ -66,3 +75,4 @@ private:
     void     writeRecord(int x, int y);
     static uint8_t checksum(uint8_t version, uint16_t x, uint16_t y);
 };
+

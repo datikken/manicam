@@ -70,6 +70,8 @@ void PositionStore::restore() {
         // remember that there is nothing saved yet.
         lastSavedX_ = -1;
         lastSavedY_ = -1;
+        lastSeenX_  = axisX_.getPos();   // the pose we start from
+        lastSeenY_  = axisY_.getPos();
         haveSaved_  = false;
         dirty_      = false;
         return;
@@ -80,35 +82,45 @@ void PositionStore::restore() {
 
     lastSavedX_ = x;
     lastSavedY_ = y;
+    lastSeenX_  = x;                     // after restore, seen == saved
+    lastSeenY_  = y;
     haveSaved_  = true;
     dirty_      = false;
 }
 
 void PositionStore::update() {
-
-
-
-
-
     const int x = axisX_.getPos();
     const int y = axisY_.getPos();
 
-    if (x == lastSavedX_ && y == lastSavedY_) {
-        dirty_ = false;               // back where we started: nothing to save
+    // Remember what we saw last pass. This is what makes the debounce restart
+    // correctly: as long as the pose keeps changing, lastChangeMs_ keeps being
+    // pushed forward, so a save can never fire while the axis is still moving.
+    if (x != lastSeenX_ || y != lastSeenY_) {
+        lastSeenX_    = x;
+        lastSeenY_    = y;
+        lastChangeMs_ = millis();
+        dirty_        = true;          // something changed, not yet saved
         return;
     }
 
     if (!dirty_) {
-        dirty_        = true;         // first change of this spell
-        lastChangeMs_ = millis();
+        return;                        // nothing pending, nothing to do
+    }
+
+    if ((uint32_t)(millis() - lastChangeMs_) < kSaveDebounceMs) {
+        return;                        // not still long enough yet
+    }
+
+    // Already persisted this exact pose? Then just clear the flag and skip the
+    // EEPROM write entirely. This is what stops a stress test from hammering
+    // the cells: a pose is written once, not once per still period.
+    if (x == lastSavedX_ && y == lastSavedY_) {
+        dirty_ = false;
         return;
     }
 
-    if ((uint32_t)(millis() - lastChangeMs_) >= kSaveDebounceMs) {
-        saveNow();                    // been still long enough: persist it
-    }
+    saveNow();                         // been still long enough: persist it
 }
-
 void PositionStore::saveNow() {
     writeRecord(axisX_.getPos(), axisY_.getPos());
 }
@@ -120,3 +132,5 @@ void PositionStore::clear() {
     lastSavedY_ = -1;
     dirty_      = false;
 }
+
+

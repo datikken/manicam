@@ -39,11 +39,19 @@ void LinkSlave::handleReceive(int count) {
         (void)bus_.read();
     }
 
+    // These counters are diagnostics only, but they are still incremented from
+    // an ISR: a 16-bit read-modify-write is not atomic on AVR, and they can
+    // wrap. Saturating at the maximum keeps them meaningful without ever
+    // silently rolling over to a small number mid-session.
     if (ok) {
+        if (accepted_ < 0xFFFF) {
         ++accepted_;
+    }
         publish(frame);
     } else {
-        ++rejected_;
+        if (rejected_ < 0xFFFF) {
+            ++rejected_;
+}
     }
 }
 

@@ -16,23 +16,30 @@
 // works identically in both directions:
 //
 //   |delta| <= deadZone          -> stopped
-//   deadZone < |delta| < kFull   -> speed ramps up linearly with deflection
+//   deadZone < |delta| < kFull   -> speed rises with deflection
 //   |delta| >= kFull             -> maximum speed
 //
 // where delta = reading - center.
 //
-// Concretely, with a centre of 512 and kDefaultFullDeflection = 400:
+// The curve is NOT linear. It is t^1.8, which keeps gentle nudges gentle and
+// then accelerates hard toward full deflection. A straight line would tie the
+// slope of the whole stick to the top speed, so making the axis faster would
+// also make every small correction twitchy. The eased curve lets the top end be
+// fast without touching how the low end feels.
 //
-//   push to 212  (delta -300) -> ~12 deg/s   (barely creeping)
-//   push to 112  (delta -400) -> ~45 deg/s   (noticeably faster)
-//   push to   0  (delta -512) -> ~45 deg/s   (capped at maximum)
+// With a centre of 512 and kDefaultFullDeflection = 400:
 //
-// ...and symmetrically for +300 / +400 / +1023 on the other side.
+//   delta  100  -> ~13 deg/s   (fine aiming)
+//   delta  200  -> ~16 deg/s
+//   delta  300  -> ~26 deg/s   (cruising)
+//   delta  400  -> ~143 deg/s  (full travel in ~1.1 s)
+//   delta >400  -> ~143 deg/s  (capped)
 //
-// The maximum speed is deliberately modest. This drives an SG90, a small
-// positional servo: it manages roughly 300-600 deg/s at full tilt, but running
-// it flat out constantly is what wears it out. ~45 deg/s means a full 160 degree
-// sweep takes about 3.5 s, a comfortable camera-panning rate.
+// ...and symmetrically on the other side.
+//
+// ~143 deg/s is comfortably inside what an SG90 can do (rated ~500-600 deg/s
+// no-load, ~300-400 deg/s sustained), so the servo keeps up instead of lagging
+// behind the commanded angle.
 //
 // update() advances the axis by at most ONE degree per call and paces itself
 // with millis(), so loop() never blocks and the I2C receive path keeps running
@@ -110,11 +117,13 @@ private:
     static constexpr int kPlausibleMax = 824;
 
     // Step period at the two ends of the speed range, in milliseconds per
-    // degree. Slowest = the gentlest nudge just outside the dead zone;
-    // fastest = a fully deflected stick.
+    // degree.
     //
-    //   kDelaySlowest = 80 ms/deg -> ~12.5 deg/s  (delicate aiming)
-    //   kDelayFastest = 22 ms/deg -> ~45   deg/s  (full sweep in ~3.5 s)
+    //   kDelaySlowest = 80 ms/deg -> ~12.5 deg/s  (delicate aiming, unchanged)
+    //   kDelayFastest =  7 ms/deg ->  ~143 deg/s  (full sweep in ~1.1 s)
+    //
+    // The bottom of the range is what "small movement" feels like, so it is
+    // deliberately left alone when the top is retuned.
     static constexpr uint16_t kDelaySlowest = 80;
-    static constexpr uint16_t kDelayFastest = 22;
+    static constexpr uint16_t kDelayFastest = 7;
 };

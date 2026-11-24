@@ -1,3 +1,8 @@
+#include "AxisDriver/AxisDriver.h"
+
+AxisDriver::AxisDriver(Axis& axis, int center, int deadZone)
+    : axis_(axis), center_(center), deadZone_(deadZone) {}
+
 uint16_t AxisDriver::speedDelayFor(int stickValue) const {
     const int strength = abs(stickValue - center_);   // distance from rest
 
@@ -23,3 +28,4 @@ bool AxisDriver::update(int stickValue) {
     }
     return false;                             // centred: hold position
 }
+

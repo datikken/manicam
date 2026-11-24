@@ -43,7 +43,7 @@ public:
     // Print the current readings to Serial (debug helper).
     void debugPrint() const;
 
-    int  deadband() const { return deadband_; }
+    uint16_t deadband() const { return deadband_; }
     void setDeadband(uint16_t deadband) { deadband_ = deadband; }
 
 private:

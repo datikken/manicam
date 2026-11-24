@@ -16,8 +16,11 @@ void Joystick::begin() {
 }
 
 int Joystick::applyDeadband(int value) const {
+    // Compare in the same signed width on both sides: deadband_ is unsigned,
+    // so negating it directly would promote to a big unsigned value.
+    const int band  = (int)deadband_;
     const int delta = value - kCenter;
-    if (delta > -deadband_ && delta < deadband_) {
+    if (delta > -band && delta < band) {
         return kCenter;
     }
   return value;
@@ -32,7 +35,7 @@ bool Joystick::buttonDown(uint32_t now) {
         return btnStable_;              // still bouncing: keep the old state
   }
 
-    if ((uint32_t)(now - btnChanged_) >= debounceMs_ && raw != btnStable_) {
+    if ((uint32_t)(now - btnChanged_) >= (uint32_t)debounceMs_ && raw != btnStable_) {
         btnStable_ = raw;               // stable for long enough: accept it
   }
     return btnStable_;
@@ -46,3 +49,4 @@ void Joystick::debugPrint() const {
     Serial.print(" | btn:");
     Serial.println(digitalRead(pinButton_) == LOW ? 1 : 0);
 }
+

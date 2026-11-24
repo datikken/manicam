@@ -1,92 +1,75 @@
 #include <Arduino.h>
+
+#include "Axis/Axis.h"
+#include "AxisDriver/AxisDriver.h"
 #include "Joystick/Joystick.h"
 #include "Link/JoystickFrame.h"
 #include "Link/LinkMaster.h"
 
-// ---------------------------------------------------------------------------
 // MASTER BOARD - the one with the joystick.
 //
-// Wiring (Arduino Nano):
-//   VRx      -> A0          VRy     -> A1
-//   SW       -> D2  (INPUT_PULLUP, pressed = GND)
-//   SDA/SCL  -> A4 / A5     link LED -> D13 (on-board LED)
+// Owns no protocol or math code: it reads a Joystick, packages the reading into
+// a JoystickFrame and hands it to a LinkMaster. Everything about "how the bits
+// travel" lives in the Link layer, everything about the hardware in Joystick.
 //
-// This file contains no protocol logic: it only *wires objects together*.
-//   Joystick      - reads and filters the sticks/button
-//   JoystickFrame - the wire format both boards share
-//   LinkMaster    - pushes a frame down the I2C bus
-//
-// Behaviour: sample at kSendPeriodMs, skip frames when nothing changed (so the
-// bus stays quiet), and light the LED while the slave acknowledges.
-// ---------------------------------------------------------------------------
-
+// Wiring
+//   VRx        -> A0
+//   VRy        -> A1
+//   SW         -> D2   (INPUT_PULLUP, active low)
+//   SDA/SCL    -> A4/A5 (same bus as the servo board)
+//   D13        -> onboard LED, lit while the servo board acknowledges frames
 namespace {
 
-constexpr uint8_t kPinJoyX   = A0;
-constexpr uint8_t kPinJoyY   = A1;
-constexpr uint8_t kPinButton = 2;
-constexpr uint8_t kPinLink   = LED_BUILTIN;
+constexpr uint8_t  kPinJoyX     = A0;
+constexpr uint8_t  kPinJoyY     = A1;
+constexpr uint8_t  kPinJoyBtn   = 2;
+constexpr uint8_t  kPinLinkLed  = 13;
+constexpr uint8_t  kServoBoardAddr = 8;   // must match LinkSlave on the servo board
+constexpr uint16_t kSendPeriodMs   = 15;  // ~66 Hz, matches the servo loop
+Joystick    joystick(kPinJoyX, kPinJoyY, kPinJoyBtn);
+LinkMaster  link(kServoBoardAddr);
 
-constexpr uint8_t  kSlaveAddress = 8;    // must match LinkSlave on the servo board
-constexpr uint16_t kSendPeriodMs = 15;   // ~66 Hz - matches the servo refresh rate
-
-Joystick   g_joystick(kPinJoyX, kPinJoyY, kPinButton);
-LinkMaster g_link(kSlaveAddress);
-
-// Last frame the slave acknowledged. A frame is only re-sent when it differs,
-// so an untouched stick costs no bus traffic; the first frame is always sent so
-// the servo board learns about us.
-JoystickFrame g_lastSent;
-bool          g_hasSent     = false;
-uint32_t      g_lastSendMs  = 0;
-
-// Read a live frame out of the joystick object.
-void readFrame(JoystickFrame& frame, uint32_t now) {
-    frame.x   = g_joystick.x();
-    frame.y   = g_joystick.y();
-    frame.btn = g_joystick.buttonDown(now);
-    frame.clamp();
-}
-
-bool sameAsLast(const JoystickFrame& frame) {
-    return g_hasSent &&
-           frame.x == g_lastSent.x &&
-           frame.y == g_lastSent.y &&
-           frame.btn == g_lastSent.btn;
-}
-
+JoystickFrame lastSent;
+bool          everSent = false;   // the first frame is always sent
 }  // namespace
-void setup() {
-    g_joystick.begin();
-    g_link.begin();
 
-    pinMode(kPinLink, OUTPUT);
-    digitalWrite(kPinLink, LOW);
+void setup() {
+    joystick.begin();
+    link.begin();
+
+    pinMode(kPinLinkLed, OUTPUT);
+    digitalWrite(kPinLinkLed, LOW);
 }
 
 void loop() {
+  static uint32_t nextSendMs = 0;
+
     const uint32_t now = millis();
-    if (now - g_lastSendMs < kSendPeriodMs) {
+  if ((int32_t)(now - nextSendMs) < 0) {
+    return;                        // not time to send yet
+    }
+  nextSendMs = now + kSendPeriodMs;
+
+  JoystickFrame frame;
+  frame.x   = joystick.x();
+  frame.y   = joystick.y();
+  frame.btn = joystick.buttonDown(now);
+
+  // Only talk when something changed: an idle stick must not hammer the bus.
+  // When the link was lost, resend even identical data so the slave resyncs.
+  const bool changed = !everSent || frame.x != lastSent.x ||
+                       frame.y != lastSent.y || frame.btn != lastSent.btn;
+  if (!changed && link.isLinkUp()) {
         return;
     }
-    g_lastSendMs = now;
 
-    JoystickFrame frame;
-    readFrame(frame, now);
-
-    if (sameAsLast(frame)) {
-        return;                       // nothing changed: keep the bus quiet
-    }
-
-    if (g_link.send(frame)) {
-        g_lastSent = frame;           // acknowledged: remember it
-        g_hasSent  = true;
-        digitalWrite(kPinLink, HIGH);
+    if (link.send(frame)) {
+        lastSent = frame;
+    everSent = true;
+    digitalWrite(kPinLinkLed, HIGH);   // slave acknowledged us
     } else {
-        // Slave did not answer. Forget the cached frame so the next pass
-        // retries with fresh data instead of staying silent forever.
-        g_hasSent = false;
-        digitalWrite(kPinLink, LOW);
+    everSent = false;                  // retry the same frame next pass
+        digitalWrite(kPinLinkLed, LOW);
     }
 }
 

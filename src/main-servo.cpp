@@ -1,100 +1,72 @@
 #include <Arduino.h>
+
 #include "Axis/Axis.h"
 #include "AxisDriver/AxisDriver.h"
 #include "Link/JoystickFrame.h"
 #include "Link/LinkSlave.h"
 #include "PositionStore/PositionStore.h"
 
-// ---------------------------------------------------------------------------
-// SLAVE BOARD - the one with the two servos.
+// SLAVE BOARD - the one with the servos.
 //
-// Wiring (Arduino Nano):
-//   servo X signal -> D9        servo Y signal -> D10
-//   status LED     -> D4        SDA/SCL         -> A4 / A5
-//   (power the servos from a separate 5 V supply with a shared ground -
-//    the Nano's regulator cannot feed two servos)
+// Wires four objects together and nothing more:
+//   LinkSlave      receives frames from the joystick board over I2C
+//   Axis x2        own the servos, their limits and their current angle
+//   AxisDriver x2  convert a stick position into one step of motion
+//   PositionStore  saves the pose and restores it after a power cycle
 //
-// Again, this file only wires objects together:
-//   LinkSlave     - receives frames, hands over a consistent snapshot
-//   Axis          - owns a Servo + its angle/limits
-//   AxisDriver    - turns a stick reading into axis motion
-//   PositionStore - saves the pose to EEPROM and restores it after power-up
-//
-// The joystick moves each axis *relatively*: holding the stick drives the servo
-// at a speed proportional to how far it is pushed, and releasing it holds the
-// pose. That is what lets the saved position survive a power cycle - an
-// absolute mapping would snap the servo back to the stick's resting point.
-// ---------------------------------------------------------------------------
+// Wiring
+//   Servo X  -> D9
+//   Servo Y  -> D10
+//   LED      -> D4   (lit while the button on the joystick is pressed)
+//   SDA/SCL  -> A4/A5
 namespace {
 
-constexpr uint8_t kPinServoX = 9;
-constexpr uint8_t kPinServoY = 10;
-constexpr uint8_t kPinLed    = 4;
+constexpr uint8_t  kOwnAddr   = 8;    // must match LinkMaster on the joystick board
+constexpr uint8_t  kPinServoX = 9;
+constexpr uint8_t  kPinServoY = 10;
+constexpr uint8_t  kPinLed    = 4;
 
-constexpr uint8_t kOwnAddress = 8;        // must match LinkMaster on the joystick board
+// Travel limits per axis. Tighten these once the rig's real end stops are
+// known; the neutral pose is in the middle of each range.
+constexpr int kAxisXMin = 0;
+constexpr int kAxisXMax = 180;
+constexpr int kAxisYMin = 0;
+constexpr int kAxisYMax = 180;
 
-// Travel limits. Narrow these to the real mechanism's safe swing; full 0..180
-// is only the servo's own range, not necessarily yours.
-constexpr int kMinAngle = 10;
-constexpr int kMaxAngle = 170;
-
-constexpr uint32_t kLedBlinkMs = 500;     // "no signal yet" heartbeat
-
-// Objects. Axis first: the drivers and the store hold references to them.
-Axis          g_axisX(kMinAngle, kMaxAngle, Axis::kCenterAngle);
-Axis          g_axisY(kMinAngle, kMaxAngle, Axis::kCenterAngle);
-AxisDriver    g_driverX(g_axisX);
-AxisDriver    g_driverY(g_axisY);
-LinkSlave     g_link(kOwnAddress);
-PositionStore g_store(g_axisX, g_axisY);
-
-JoystickFrame g_frame;                    // latest snapshot from the master
-bool          g_haveSignal = false;
-uint32_t      g_lastBlinkMs = 0;
-bool          g_ledOn = false;
-
-void updateSignalLed(uint32_t now) {
-    if (g_haveSignal) {
-        digitalWrite(kPinLed, HIGH);      // solid while the master is talking
-        g_ledOn = true;
-        return;
-    }
-    if (now - g_lastBlinkMs >= kLedBlinkMs) {
-        g_lastBlinkMs = now;
-        g_ledOn = !g_ledOn;
-        digitalWrite(kPinLed, g_ledOn);
-    }
-}
-
+Axis        axisX(kAxisXMin, kAxisXMax);
+Axis        axisY(kAxisYMin, kAxisYMax);
+AxisDriver  driverX(axisX);
+AxisDriver  driverY(axisY);
+PositionStore positions(axisX, axisY);
+LinkSlave   link(kOwnAddr);
 }  // namespace
 
 void setup() {
-    pinMode(kPinLed, OUTPUT);
-    digitalWrite(kPinLed, LOW);
+    axisX.begin(kPinServoX);
+    axisY.begin(kPinServoY);
+  pinMode(kPinLed, OUTPUT);
+  digitalWrite(kPinLed, LOW);
 
-    // Attach the servos at the neutral pose first, then let the store move them
-    // to the pose they had before the power was cut.
-    g_axisX.begin(kPinServoX);
-    g_axisY.begin(kPinServoY);
-    g_store.restore();
+  // Bring the rig back to the pose it had before the power was cut. Must run
+  // before the link starts, otherwise the first incoming frame could overwrite
+  // the restored pose before it is ever written to EEPROM.
+  positions.restore();
 
-    g_link.begin();
+    link.begin();
 }
 
 void loop() {
-    const uint32_t now = millis();
+  JoystickFrame frame;
 
-    // Pick up a freshly received frame, if the master sent one.
-    if (g_link.take(g_frame)) {
-        g_haveSignal = true;
-    }
-    // Drive the axes: one step per pass, speed taken from the stick position.
-    g_driverX.update(g_frame.x);
-    g_driverY.update(g_frame.y);
+  // take() reports whether this is a fresh frame; when nothing new arrived we
+  // keep working with the last known stick position so a slower sender does not
+  // stall the servos.
+  link.take(frame);
+    driverX.update(frame.x);
+    driverY.update(frame.y);
 
-    // Persist the pose once the axes stop moving.
-    g_store.update();
+  digitalWrite(kPinLed, frame.btn ? HIGH : LOW);
 
-    updateSignalLed(now);
+  positions.update();      // persists the pose once the axes settle
 }
 

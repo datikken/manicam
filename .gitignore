@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+test/run_tests.exe
+test/*.obj
+test/*.o

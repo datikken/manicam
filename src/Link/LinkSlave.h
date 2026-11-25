@@ -48,6 +48,11 @@ public:
     void     resetStats() { accepted_ = 0; rejected_ = 0; lastCount_ = -1; }
 
 private:
+    // The host test suite simulates the I2C interrupt by calling the handler
+    // directly; on hardware only the trampoline below ever does. Friendship
+    // keeps the public surface unchanged.
+    friend struct LinkSlaveTestHook;
+
     static void onReceiveTrampoline(int count);
 
     void handleReceive(int count);

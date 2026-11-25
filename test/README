@@ -1,11 +1,72 @@
+﻿# Host-side unit tests
 
-This directory is intended for PlatformIO Test Runner and project tests.
+These tests run on the development machine, not on the Nano. They cover every
+class in `src/`, need no hardware attached, and finish in well under a second.
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+## Running them
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+```
+test\run_tests.bat
+```
+
+or, equivalently, build and run by hand:
+
+```
+clang++ -std=c++17 -I test/support -I src -o test/run_tests.exe ^
+    test/test_main.cpp test/test_*.cpp ^
+    src/Axis/Axis.cpp src/AxisDriver/AxisDriver.cpp src/Joystick/Joystick.cpp ^
+    src/Link/JoystickFrame.cpp src/Link/LinkMaster.cpp src/Link/LinkSlave.cpp ^
+    src/PositionStore/PositionStore.cpp ^
+    -Xlinker /subsystem:console
+test\run_tests.exe
+```
+
+The script exits non-zero when a test fails, so it can be dropped straight into
+CI.
+
+## How it works
+
+`test/support/` contains stand-ins for the four Arduino headers the application
+includes:
+
+| Header | What the shim does |
+|---|---|
+| `Arduino.h` | virtual `millis()`, settable `digitalRead()`/`analogRead()`, recorded `digitalWrite()`, assignable `SREG` |
+| `Servo.h` | records every `write()`, so a test can assert on commanded angles |
+| `EEPROM.h` | a real 1 KiB array that counts changed bytes |
+| `Wire.h` | a byte queue for the receive side, a captured buffer for the send side |
+
+Nothing about the production sources changes: `-I test/support` simply means
+`#include <Arduino.h>` resolves to the shim instead of the AVR framework.
+
+`test/support/TestFramework.h` is a small assertion framework so the suite
+builds with nothing but a C++17 compiler - no PlatformIO, no Unity.
+
+## What is covered
+
+| File | Class |
+|---|---|
+| `test_axis.cpp` | `Axis` - limits, clamping, one-degree stepping, no wrap-around |
+| `test_axis_driver.cpp` | `AxisDriver` - dead zone, direction, speed curve, pacing |
+| `test_joystick_frame.cpp` | `JoystickFrame` - wire format, round-trip, rejection of corrupt frames |
+| `test_joystick.cpp` | `Joystick` - dead band, button debouncing, millis() wrap |
+| `test_position_store.cpp` | `PositionStore` - save/restore, validation, debounce |
+| `test_link_slave.cpp` | `LinkSlave` - receive, publish, reject, counters |
+| `test_link_master.cpp` | `LinkMaster` - addressing, acknowledgement, link state |
+
+Several tests are deliberate regressions guards:
+
+* `Axis_Rotate.never_wraps_*` - a positional SG90 must clamp, never wrap.
+* `PositionStore_Debounce.does_not_save_while_the_pose_keeps_changing` and
+  `a_stress_run_does_not_storm_the_eeprom` - EEPROM writes must not happen
+  during motion. Blocking writes starved the I2C path and froze the board
+  under a fast stress test.
+
+## Notes
+
+* `LinkSlave` exposes a single `friend struct LinkSlaveTestHook` so the suite can
+  invoke the private handler that the I2C interrupt would call. It costs nothing
+  at runtime and is the only test hook in the codebase.
+* `AxisDriver` documents one quirk by test: a freshly constructed driver refuses
+  its first step until one full pacing period has elapsed, because `lastStepMs_`
+  and `millis()` both start at 0. On hardware this costs at most one frame.
